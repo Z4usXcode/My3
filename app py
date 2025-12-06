@@ -1,0 +1,114 @@
+import random
+import time
+import requests
+from flask import Flask, request, jsonify
+from TikSign import *
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/send_code', methods=['POST'])
+def send_code():
+    try:
+        data = request.get_json()
+        if not data or 'email' not in data:
+            return jsonify({"error": "Email gerekli"}), 400
+        
+        em = data['email']
+        
+        url = "https://api2.musical.ly/passport/email/send_code/"
+        
+        params = {
+            "account_sdk_version": "371",
+            "manifest_version_code": "2021306050",
+            "_rticket": str(int(time.time() * 1000)),
+            "app_language": "en",
+            "app_type": "normal",
+            "iid": str(random.randint(7000000000000000000, 8000000000000000000)),
+            "channel": "googleplay",
+            "device_type": random.choice(["SM-G998B", "M2101K7AG", "CPH2371", "V2111", "RMX3081"]),
+            "language": "en",
+            "locale": "en",
+            "resolution": "1080*2280",
+            "openudid": ''.join(random.choices('0123456789abcdef', k=16)),
+            "update_version_code": "2021306050",
+            "ac2": "wifi",
+            "sys_region": "US",
+            "os_api": str(random.randint(29, 33)),
+            "uoo": "0",
+            "is_my_cn": "0",
+            "timezone_name": "Asia/Baghdad",
+            "dpi": "480",
+            "carrier_region": "IQ",
+            "ac": "wifi",
+            "device_id": str(random.randint(7000000000000000000, 8000000000000000000)),
+            "pass-route": "1",
+            "mcc_mnc": "41820",
+            "os_version": str(random.randint(10, 13)),
+            "timezone_offset": "10800",
+            "version_code": "130605",
+            "carrier_region_v2": "418",
+            "app_name": "musical_ly",
+            "ab_version": "13.6.5",
+            "version_name": "13.6.5",
+            "device_brand": random.choice(["SAMSUNG", "XIAOMI", "OPPO", "VIVO", "TECNO"]),
+            "ssmix": "a",
+            "pass-region": "1",
+            "device_platform": "android",
+            "build_number": "13.6.5",
+            "region": "en",
+            "aid": "1233",
+            "ts": str(int(time.time()))
+        }
+        
+        params.update(Newparams())
+        ua = UserAgentTik(params)
+        params.update({'device_type': ua["type"]})
+        params.update({'device_brand': ua["brand"]})
+        
+        # ORİJİNAL TIKTOK PAYLOAD'I (Değiştirme!)
+        payload = {
+            'account_sdk_source': "app",
+            'mix_mode': "1",
+            'type': "31",
+            'email': em
+        }
+        
+        si = sign(params=params, payload=payload, version='8404')
+        headers = {'User-Agent': ua['User-Agent']}
+        headers.update(si)
+        
+        r1 = requests.post(url, data=payload, headers=headers, params=params)
+        response_data = r1.json()
+        
+        print("TikTok Response:", response_data)  # Debug için
+        
+        if 'data' in response_data and 'email_ticket' in response_data['data']:
+            # İstekte Dev bilgisi var mı kontrol et
+            dev_info = data.get('Dev', '@Z4usXcode')
+            
+            result = {
+                "success": True,
+                "email": em,
+                "Dev": dev_info,
+                "email_ticket": response_data["data"]["email_ticket"]
+            }
+            return jsonify(result), 200
+        else:
+            error_msg = response_data.get('message', 'Bilinmeyen hata')
+            return jsonify({
+                "error": "email_ticket alınamadı",
+                "tiktok_error": error_msg,
+                "response": response_data
+            }), 400
+            
+    except Exception as e:
+        import traceback
+        print("Exception:", traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
