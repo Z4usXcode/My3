@@ -1,114 +1,334 @@
-import random
-import time
-import requests
 from flask import Flask, request, jsonify
-from TikSign import *
-from flask_cors import CORS
+import requests
+import json
+import threading
+import time
+from datetime import datetime
+import schedule
 
 app = Flask(__name__)
-CORS(app)
 
-@app.route('/send_code', methods=['POST'])
-def send_code():
+# İstek geçmişini saklamak için
+request_history = []
+
+# Varsayılan email (DEĞİŞTİRMENİZ GEREKİR)
+DEFAULT_EMAIL = "ornek@email.com"  # BURAYI KENDİ EMAİLİNİZLE DEĞİŞTİRİN
+
+def make_request(email):
+    """API'ye istek gönderen fonksiyon"""
     try:
-        data = request.get_json()
-        if not data or 'email' not in data:
-            return jsonify({"error": "Email gerekli"}), 400
-        
-        em = data['email']
-        
-        url = "https://api2.musical.ly/passport/email/send_code/"
-        
-        params = {
-            "account_sdk_version": "371",
-            "manifest_version_code": "2021306050",
-            "_rticket": str(int(time.time() * 1000)),
-            "app_language": "en",
-            "app_type": "normal",
-            "iid": str(random.randint(7000000000000000000, 8000000000000000000)),
-            "channel": "googleplay",
-            "device_type": random.choice(["SM-G998B", "M2101K7AG", "CPH2371", "V2111", "RMX3081"]),
-            "language": "en",
-            "locale": "en",
-            "resolution": "1080*2280",
-            "openudid": ''.join(random.choices('0123456789abcdef', k=16)),
-            "update_version_code": "2021306050",
-            "ac2": "wifi",
-            "sys_region": "US",
-            "os_api": str(random.randint(29, 33)),
-            "uoo": "0",
-            "is_my_cn": "0",
-            "timezone_name": "Asia/Baghdad",
-            "dpi": "480",
-            "carrier_region": "IQ",
-            "ac": "wifi",
-            "device_id": str(random.randint(7000000000000000000, 8000000000000000000)),
-            "pass-route": "1",
-            "mcc_mnc": "41820",
-            "os_version": str(random.randint(10, 13)),
-            "timezone_offset": "10800",
-            "version_code": "130605",
-            "carrier_region_v2": "418",
-            "app_name": "musical_ly",
-            "ab_version": "13.6.5",
-            "version_name": "13.6.5",
-            "device_brand": random.choice(["SAMSUNG", "XIAOMI", "OPPO", "VIVO", "TECNO"]),
-            "ssmix": "a",
-            "pass-region": "1",
-            "device_platform": "android",
-            "build_number": "13.6.5",
-            "region": "en",
-            "aid": "1233",
-            "ts": str(int(time.time()))
+        url = "https://email-to-user.onrender.com/email_to_user"
+        data = {
+            "email": email,
+            "dev": "@Z4usXcode"
         }
         
-        params.update(Newparams())
-        ua = UserAgentTik(params)
-        params.update({'device_type': ua["type"]})
-        params.update({'device_brand': ua["brand"]})
+        print(f"[{datetime.now()}] {email} için istek gönderiliyor...")
         
-        # ORİJİNAL TIKTOK PAYLOAD'I (Değiştirme!)
-        payload = {
-            'account_sdk_source': "app",
-            'mix_mode': "1",
-            'type': "31",
-            'email': em
+        response = requests.post(url, json=data, timeout=10)
+        
+        result = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "email": email,
+            "status_code": response.status_code,
+            "response": response.json() if response.status_code == 200 else {"error": "İstek başarısız"}
         }
         
-        si = sign(params=params, payload=payload, version='8404')
-        headers = {'User-Agent': ua['User-Agent']}
-        headers.update(si)
-        
-        r1 = requests.post(url, data=payload, headers=headers, params=params)
-        response_data = r1.json()
-        
-        print("TikTok Response:", response_data)  # Debug için
-        
-        if 'data' in response_data and 'email_ticket' in response_data['data']:
-            # İstekte Dev bilgisi var mı kontrol et
-            dev_info = data.get('Dev', '@Z4usXcode')
+        # Geçmişe ekle (max 50 kayıt)
+        request_history.append(result)
+        if len(request_history) > 50:
+            request_history.pop(0)
             
-            result = {
-                "success": True,
-                "email": em,
-                "Dev": dev_info,
-                "email_ticket": response_data["data"]["email_ticket"]
-            }
-            return jsonify(result), 200
-        else:
-            error_msg = response_data.get('message', 'Bilinmeyen hata')
-            return jsonify({
-                "error": "email_ticket alınamadı",
-                "tiktok_error": error_msg,
-                "response": response_data
-            }), 400
-            
+        print(f"[{datetime.now()}] İstek tamamlandı. Durum: {response.status_code}")
+        return result
+        
     except Exception as e:
-        import traceback
-        print("Exception:", traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        error_result = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "email": email,
+            "status_code": "ERROR",
+            "response": {"error": str(e)}
+        }
+        request_history.append(error_result)
+        if len(request_history) > 50:
+            request_history.pop(0)
+        print(f"[{datetime.now()}] Hata: {str(e)}")
+        return error_result
+
+def schedule_requests(email, interval_minutes=5):
+    """Periyodik istekleri planlayan fonksiyon"""
+    def job():
+        make_request(email)
+    
+    # Schedule'ı temizle
+    schedule.clear()
+    
+    # Yeni schedule oluştur
+    schedule.every(interval_minutes).minutes.do(job)
+    
+    print(f"[{datetime.now()}] {email} için {interval_minutes} dakikada bir istek planlandı")
+    
+    # İlk isteği hemen gönder
+    threading.Thread(target=make_request, args=(email,)).start()
+    
+    # Schedule loop'u çalıştır
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# UYGULAMA BAŞLAR BAŞLAMAZ OTOMATİK İSTEK BAŞLAT
+def start_automatically():
+    """Uygulama başlar başlamaz otomatik istek başlat"""
+    print(f"[{datetime.now()}] OTOMATİK BAŞLATILIYOR: {DEFAULT_EMAIL}")
+    thread = threading.Thread(
+        target=schedule_requests,
+        args=(DEFAULT_EMAIL, 5),  # 5 dakikada bir
+        daemon=True
+    )
+    thread.start()
+
+@app.route('/')
+def index():
+    """Ana sayfa - Basit HTML arayüzü"""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Email API İstek Yöneticisi</title>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }}
+            .container {{
+                background: white;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .status {{
+                background-color: #d4edda;
+                border: 1px solid #c3e6cb;
+                color: #155724;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }}
+            .input-group {{
+                margin-bottom: 15px;
+            }}
+            input, select, button {{
+                padding: 10px;
+                margin: 5px 0;
+                width: 100%;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }}
+            button {{
+                background-color: #007bff;
+                color: white;
+                border: none;
+                cursor: pointer;
+                font-weight: bold;
+            }}
+            button:hover {{
+                background-color: #0056b3;
+            }}
+            .history-item {{
+                border-left: 4px solid #007bff;
+                padding: 10px;
+                margin: 10px 0;
+                background-color: #f8f9fa;
+            }}
+            .success {{ border-left-color: #28a745; }}
+            .error {{ border-left-color: #dc3545; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📧 Email API İstek Yöneticisi</h1>
+            
+            <div class="status">
+                ✅ <strong>OTOMATİK ÇALIŞIYOR</strong><br>
+                Email: {DEFAULT_EMAIL}<br>
+                Sıklık: 5 dakikada bir<br>
+                Başlangıç: {datetime.now().strftime('%H:%M:%S')}
+            </div>
+            
+            <div class="input-group">
+                <h3>Yeni Periyodik İstek Başlat</h3>
+                <input type="email" id="email" placeholder="Yeni email adresini girin">
+                <select id="interval">
+                    <option value="1">1 dakikada bir</option>
+                    <option value="5" selected>5 dakikada bir</option>
+                    <option value="10">10 dakikada bir</option>
+                </select>
+                <button onclick="startRequests()">Yeni İstek Başlat</button>
+                <p><small>Not: Yeni bir email girerseniz, eski istekler durur ve yenisi başlar</small></p>
+            </div>
+            
+            <div class="input-group">
+                <h3>Manuel Tek İstek Gönder</h3>
+                <input type="email" id="manualEmail" placeholder="Test için email girin">
+                <button onclick="manualRequest()" style="background-color: #28a745;">Tek İstek Gönder</button>
+            </div>
+            
+            <div class="input-group">
+                <h3>İstek Geçmişi (Son 10)</h3>
+                <button onclick="loadHistory()" style="background-color: #6c757d;">Geçmişi Yenile</button>
+                <button onclick="clearHistory()" style="background-color: #dc3545;">Geçmişi Temizle</button>
+                <div id="history"></div>
+            </div>
+        </div>
+        
+        <script>
+            async function startRequests() {{
+                const email = document.getElementById('email').value;
+                const interval = document.getElementById('interval').value;
+                
+                if (!email) {{
+                    alert('Lütfen bir email adresi girin!');
+                    return;
+                }}
+                
+                const response = await fetch('/start', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ email: email, interval: interval }})
+                }});
+                
+                const result = await response.json();
+                alert(result.message);
+                loadHistory();
+            }}
+            
+            async function manualRequest() {{
+                const email = document.getElementById('manualEmail').value;
+                
+                if (!email) {{
+                    alert('Lütfen bir email adresi girin!');
+                    return;
+                }}
+                
+                const response = await fetch('/manual-request', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ email: email }})
+                }});
+                
+                const result = await response.json();
+                alert('İstek gönderildi! Durum: ' + result.status_code);
+                loadHistory();
+            }}
+            
+            async function loadHistory() {{
+                const response = await fetch('/history');
+                const history = await response.json();
+                
+                const historyDiv = document.getElementById('history');
+                historyDiv.innerHTML = '';
+                
+                // En yeni kayıtlar üstte olacak şekilde sırala (son 10)
+                history.slice().reverse().slice(0, 10).forEach(req => {{
+                    const statusClass = req.status_code === 200 ? 'success' : 'error';
+                    const statusText = req.status_code === 200 ? '✅ Başarılı' : '❌ Hata';
+                    
+                    historyDiv.innerHTML += `
+                        <div class="history-item ${{statusClass}}">
+                            <div><strong>Email:</strong> ${{req.email}}</div>
+                            <div><strong>Zaman:</strong> ${{req.timestamp}}</div>
+                            <div><strong>Durum:</strong> ${{statusText}} (${{req.status_code}})</div>
+                        </div>
+                    `;
+                }});
+            }}
+            
+            async function clearHistory() {{
+                const response = await fetch('/clear-history', {{ method: 'POST' }});
+                const result = await response.json();
+                alert(result.message);
+                loadHistory();
+            }}
+            
+            // Sayfa yüklendiğinde geçmişi yükle
+            window.onload = loadHistory;
+            
+            // Her 10 saniyede bir geçmişi otomatik yenile
+            setInterval(loadHistory, 10000);
+        </script>
+    </body>
+    </html>
+    """
+
+@app.route('/start', methods=['POST'])
+def start_requests():
+    """Periyodik istekleri başlat"""
+    data = request.json
+    email = data.get('email')
+    interval = int(data.get('interval', 5))
+    
+    if not email:
+        return jsonify({"error": "Email gereklidir"}), 400
+    
+    # Arka planda schedule thread'ini başlat
+    thread = threading.Thread(
+        target=schedule_requests,
+        args=(email, interval),
+        daemon=True
+    )
+    thread.start()
+    
+    return jsonify({
+        "message": f"{email} için {interval} dakikada bir istekler başlatıldı",
+        "status": "started"
+    })
+
+@app.route('/manual-request', methods=['POST'])
+def manual_request():
+    """Manuel istek gönder"""
+    data = request.json
+    email = data.get('email')
+    
+    if not email:
+        return jsonify({"error": "Email gereklidir"}), 400
+    
+    result = make_request(email)
+    
+    return jsonify(result)
+
+@app.route('/history')
+def get_history():
+    """İstek geçmişini getir"""
+    return jsonify(request_history)
+
+@app.route('/clear-history', methods=['POST'])
+def clear_history():
+    """Geçmişi temizle"""
+    request_history.clear()
+    return jsonify({"message": "Geçmiş temizlendi"})
 
 if __name__ == '__main__':
-    import os
+    print("""
+    ╔══════════════════════════════════════════════════════╗
+    ║      Email API İstek Yöneticisi Başlatılıyor...      ║
+    ╠══════════════════════════════════════════════════════╣
+    ║ Web Arayüzü: http://localhost:5000                   ║
+    ║                                                      ║
+    ║ ⚡ OTOMATİK BAŞLATMA AKTİF!                          ║
+    ║ Email: ornek@email.com                               ║
+    ║ Sıklık: 5 dakikada bir                               ║
+    ║                                                      ║
+    ║ ⚠ DİKKAT: 'ornek@email.com' yerine kendi            ║
+    ║   email adresinizi yazın! (app.py dosyasında)        ║
+    ╚══════════════════════════════════════════════════════╝
+    """)
+    
+    # OTOMATİK BAŞLAT
+    start_automatically()
+    
+        import os
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host="0.0.0.0", port=port)
